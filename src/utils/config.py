@@ -1,5 +1,4 @@
 import os
-import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -78,7 +77,7 @@ class Settings:
         Génère dynamiquement l'URL de connexion PostgreSQL.
         Si aucun mot de passe ou utilisateur n'est configuré, bascule automatiquement sur SQLite local.
         """
-        if not self.DB_PASSWORD or self.DB_USER == "postgres" and not os.getenv("DB_PASSWORD"):
+        if not self.DB_PASSWORD or (self.DB_USER == "postgres" and not os.getenv("DB_PASSWORD")):
             # Fallback sur une base de données SQLite de développement locale
             db_path = self.RAW_DATA_DIR / "local_database.db"
             return f"sqlite:///{db_path.as_posix()}"
@@ -88,8 +87,10 @@ class Settings:
     # --------------------------------------------------------------------------
     # CONSTANTES FINANCIÈRES PAR DÉFAUT
     # --------------------------------------------------------------------------
-    DEFAULT_TICKER: str = os.getenv("DEFAULT_TICKER", "AAPL")
-    DEFAULT_BENCHMARK: str = os.getenv("DEFAULT_BENCHMARK", "^GSPC")
+    # Constantes financières — contexte BRVM / UEMOA
+    DEFAULT_TICKER: str = os.getenv("DEFAULT_TICKER", "SNTS.SN")    # Sonatel
+    DEFAULT_BENCHMARK: str = os.getenv("DEFAULT_BENCHMARK", "BRVMC") # BRVM Composite
+    RISK_FREE_RATE: float = float(os.getenv("RISK_FREE_RATE", "0.055"))  # 5.5 % OAT UEMOA
 
 
 # Instanciation de l'objet singleton global accessible dans tout le projet

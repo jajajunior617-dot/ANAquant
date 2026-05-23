@@ -18,3 +18,8 @@ QuantLib-Python
 sqlalchemy
 psycopg2-binary # Pour PostgreSQL si besoin plus tard
 python-dotenv
+
+# Tests
+pytest
+requests
+beautifulsoup4
