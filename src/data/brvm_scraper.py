@@ -29,7 +29,9 @@ logger = setup_logger(__name__)
 # Configuration du scraper
 # ──────────────────────────────────────────────────────────────────────────────
 
-BASE_URL = "https://www.sikafinance.com/marches/historique"
+# Endpoint confirmé : retourne ~64 jours de données réelles (headers + tableau OHLCV)
+# Pour un historique multi-années, Selenium serait nécessaire (données chargées via WS)
+BASE_URL = "https://www.sikafinance.com/marches/historiques"
 
 HEADERS = {
     "User-Agent": (
@@ -46,17 +48,17 @@ DELAY_BETWEEN_TICKERS = 2 # politesse envers le serveur
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Mapping ticker BRVM → code Sika Finance
-# Les codes Sika Finance omettent le suffixe de marché (.SN, .CI)
+# Format Sika Finance : minuscule du pays (ex: SNTS.sn, CIEC.ci)
 # ──────────────────────────────────────────────────────────────────────────────
 TICKER_TO_SIKA: dict[str, str] = {
-    "SNTS.SN": "SNTS",
-    "SGBC.CI": "SGBC",
-    "CIEC.CI": "CIEC",
-    "NSBC.CI": "NSBC",
-    "BOAS.SN": "BOAS",
-    "SCRC.CI": "SCRC",
-    "ORAC.CI": "ORAC",
-    "PALC.CI": "PALC",
+    "SNTS.SN": "SNTS.sn",
+    "SGBC.CI": "SGBC.ci",
+    "CIEC.CI": "CIEC.ci",
+    "NSBC.CI": "NSBC.ci",
+    "BOAS.SN": "BOAS.sn",
+    "SCRC.CI": "SCRC.ci",
+    "ORAC.CI": "ORAC.ci",
+    "PALC.CI": "PALC.ci",
 }
 
 
@@ -91,92 +93,66 @@ def fetch_ticker_history(ticker: str, years: int = 5) -> pd.DataFrame | None:
 
 def _parse_sika_html(html: str, ticker: str) -> pd.DataFrame | None:
     """
-    Parse le tableau HTML de l'historique Sika Finance.
+    Parse le tableau HTML de la page /marches/historiques/<code> de Sika Finance.
+
+    Colonnes réelles confirmées :
+      Date | Clôture | Plus bas | Plus haut | Ouverture | Volume Titres | Volume FCFA | Variation %
 
     Returns:
-        DataFrame avec colonnes Open, High, Low, Close, Volume ou None si parsing échoue.
+        DataFrame OHLCV indexé par Date, ou None si parsing échoue.
     """
     soup = BeautifulSoup(html, "html.parser")
-
-    # Chercher le premier tableau de données historiques
     table = soup.find("table")
     if table is None:
         logger.error("Aucun tableau trouvé dans la page Sika Finance pour %s.", ticker)
         return None
 
     try:
-        # pandas peut parser un tableau HTML directement
-        dfs = pd.read_html(str(table), decimal=",", thousands=" ")
-        if not dfs:
-            return None
-        df = dfs[0]
+        rows = table.find_all("tr")
+        headers_row = [th.get_text(strip=True) for th in rows[0].find_all(["th", "td"])]
+        data = []
+        for row in rows[1:]:
+            cells = [td.get_text(strip=True) for td in row.find_all("td")]
+            if cells:
+                data.append(cells)
+        df = pd.DataFrame(data, columns=headers_row)
     except Exception as exc:
         logger.error("Erreur parsing tableau HTML pour %s : %s", ticker, exc)
         return None
 
-    # Normalisation des noms de colonnes (Sika Finance peut varier)
-    col_map = _detect_columns(df.columns.tolist())
-    if col_map is None:
-        logger.error(
-            "Structure de tableau non reconnue pour %s. Colonnes : %s",
-            ticker, df.columns.tolist()
-        )
+    # Renommage des colonnes Sika Finance → OHLCV standard
+    rename = {
+        "Date":           "Date",
+        "Clôture":        "Close",
+        "Plus bas":       "Low",
+        "Plus haut":      "High",
+        "Ouverture":      "Open",
+        "Volume Titres":  "Volume",
+    }
+    df = df.rename(columns=rename)
+
+    missing = [c for c in ["Date", "Open", "High", "Low", "Close", "Volume"] if c not in df.columns]
+    if missing:
+        logger.error("Colonnes manquantes pour %s : %s. Colonnes reçues : %s",
+                     ticker, missing, df.columns.tolist())
         return None
 
-    df = df.rename(columns=col_map)
     df = df[["Date", "Open", "High", "Low", "Close", "Volume"]].copy()
 
-    # Nettoyage
+    # Nettoyage : espaces insécables (\xa0), virgules décimales, conversion numérique
     df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
-    df = df.dropna(subset=["Date"])
-    df = df.set_index("Date").sort_index()
-
     for col in ["Open", "High", "Low", "Close", "Volume"]:
         df[col] = pd.to_numeric(
-            df[col].astype(str).str.replace(" ", "").str.replace(",", "."),
+            df[col].astype(str)
+                   .str.replace("\xa0", "", regex=False)
+                   .str.replace(" ", "", regex=False)
+                   .str.replace(",", ".", regex=False),
             errors="coerce",
         )
 
-    df = df.dropna()
+    df = df.dropna().set_index("Date").sort_index()
     logger.info("Données récupérées pour %s : %d lignes.", ticker, len(df))
     return df
-
-
-def _detect_columns(columns: list) -> dict | None:
-    """
-    Détecte et mappe les noms de colonnes Sika Finance vers le standard OHLCV.
-
-    Retourne None si les colonnes obligatoires ne sont pas trouvées.
-    """
-    col_lower = [str(c).lower().strip() for c in columns]
-    mapping: dict[str, str] = {}
-
-    patterns = {
-        "Date":   ["date", "séance"],
-        "Open":   ["ouverture", "open", "ouvr"],
-        "High":   ["haut", "high", "plus haut"],
-        "Low":    ["bas", "low", "plus bas"],
-        "Close":  ["clôture", "cloture", "close", "dernier", "cours"],
-        "Volume": ["volume", "vol", "qté", "quantite"],
-    }
-
-    for target, candidates in patterns.items():
-        for i, col in enumerate(col_lower):
-            if any(cand in col for cand in candidates):
-                mapping[columns[i]] = target
-                break
-
-    required = {"Date", "Close", "Volume"}
-    found = set(mapping.values())
-    if not required.issubset(found):
-        return None
-
-    # Colonnes OHLC manquantes → on les dérive de Close
-    for col in ["Open", "High", "Low"]:
-        if col not in found:
-            mapping[f"_missing_{col}"] = col
-
-    return mapping
 
 
 def scrape_all_tickers(save_csv: bool = True) -> dict[str, pd.DataFrame | None]:
