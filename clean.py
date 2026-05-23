@@ -8,7 +8,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 # Dossiers à exclure absolument du nettoyage (comme l'environnement virtuel)
-EXCLUDE_DIRS = {"data_env", "venv", ".venv", "env", ".git"}
+EXCLUDE_DIRS = {"ana_env", "data_env", "venv", ".venv", "env", ".git"}
 
 def remove_readonly(func, path, excinfo):
     """Gestionnaire d'erreurs pour forcer la suppression des fichiers en lecture seule sous Windows."""

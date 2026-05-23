@@ -25,10 +25,9 @@ env/
 logs/
 *.log
 
-# Données (On ignore tout sauf les fichiers .gitkeep pour préserver la structure des dossiers)
+# Données (structure préservée via .gitkeep ; les CSV et graphiques ne sont pas versionnés)
 data/**/*
 !data/**/.gitkeep
-!data/**/test_plot.png # Optionnel : on peut garder le plot de test initial
 
 # Configuration IDE
 .vscode/
